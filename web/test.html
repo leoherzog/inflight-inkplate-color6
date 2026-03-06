@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Inkplate BLE Test</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+        canvas { border: 1px solid #ccc; display: block; margin: 1rem 0; max-width: 100%; }
+        button { font-size: 1rem; padding: 0.5rem 1rem; margin: 0.25rem 0.25rem 0.25rem 0; }
+        button:disabled { opacity: 0.5; }
+        #log { white-space: pre-wrap; font-family: monospace; font-size: 0.85rem;
+               background: #f5f5f5; padding: 1rem; max-height: 300px; overflow-y: auto; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+    <h1>Inkplate BLE Test</h1>
+    <p>Sends the Soldered splash image to an Inkplate 6COLOR over BLE.</p>
+    <button id="connectBtn">Connect</button>
+    <button id="sendBtn" disabled>Send Image</button>
+    <canvas id="preview" width="600" height="448"></canvas>
+    <div id="log"></div>
+
+<script>
+const SERVICE_UUID = '12345678-1234-5678-1234-56789abcdef0';
+const CMD_UUID     = '12345678-1234-5678-1234-56789abcdef1';
+const DATA_UUID    = '12345678-1234-5678-1234-56789abcdef2';
+
+const IMG_URL = 'splash.jpg';
+const WIDTH = 600, HEIGHT = 448;
+const CHUNK_SIZE = 500;
+
+// Approximate RGB values for the 7-color ACeP e-ink palette
+const PALETTE = [
+    [0,   0,   0],    // 0 Black
+    [255, 255, 255],  // 1 White
+    [0,   128, 0],    // 2 Green
+    [0,   0,   128],  // 3 Blue
+    [196, 0,   0],    // 4 Red
+    [255, 255, 0],    // 5 Yellow
+    [255, 128, 0],    // 6 Orange
+];
+
+let cmdChar = null, dataChar = null;
+const logEl = document.getElementById('log');
+
+function log(msg) {
+    logEl.textContent += msg + '\n';
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+// Closest palette color by squared Euclidean distance
+function closestColor(r, g, b) {
+    let best = 0, bestDist = Infinity;
+    for (let i = 0; i < PALETTE.length; i++) {
+        const dr = r - PALETTE[i][0], dg = g - PALETTE[i][1], db = b - PALETTE[i][2];
+        const d = dr * dr + dg * dg + db * db;
+        if (d < bestDist) { bestDist = d; best = i; }
+    }
+    return best;
+}
+
+// Floyd-Steinberg dithering → Uint8Array of color indices (WIDTH * HEIGHT)
+function ditherImage(imageData) {
+    const w = imageData.width, h = imageData.height;
+    // Work in float to accumulate error without clamping
+    const buf = new Float32Array(w * h * 3);
+    for (let i = 0; i < w * h; i++) {
+        buf[i * 3]     = imageData.data[i * 4];
+        buf[i * 3 + 1] = imageData.data[i * 4 + 1];
+        buf[i * 3 + 2] = imageData.data[i * 4 + 2];
+    }
+
+    const result = new Uint8Array(w * h);
+
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const i = (y * w + x) * 3;
+            const r = buf[i], g = buf[i + 1], b = buf[i + 2];
+            const ci = closestColor(r, g, b);
+            result[y * w + x] = ci;
+
+            const er = r - PALETTE[ci][0];
+            const eg = g - PALETTE[ci][1];
+            const eb = b - PALETTE[ci][2];
+
+            const spread = (dx, dy, f) => {
+                const nx = x + dx, ny = y + dy;
+                if (nx >= 0 && nx < w && ny < h) {
+                    const ni = (ny * w + nx) * 3;
+                    buf[ni]     += er * f;
+                    buf[ni + 1] += eg * f;
+                    buf[ni + 2] += eb * f;
+                }
+            };
+            spread(1,  0, 7 / 16);
+            spread(-1, 1, 3 / 16);
+            spread(0,  1, 5 / 16);
+            spread(1,  1, 1 / 16);
+        }
+    }
+    return result;
+}
+
+// Pack color indices → 4-bit packed buffer (high nibble = even pixel, low nibble = odd pixel)
+function packBuffer(indices) {
+    const packed = new Uint8Array(WIDTH * HEIGHT / 2);
+    for (let i = 0; i < indices.length; i += 2) {
+        packed[i / 2] = (indices[i] << 4) | indices[i + 1];
+    }
+    return packed;
+}
+
+// Load image, dither, show preview, return packed buffer
+async function loadAndDither() {
+    log('Fetching image...');
+    const canvas = document.getElementById('preview');
+    const ctx = canvas.getContext('2d');
+
+    let img;
+    try {
+        // Try fetching as blob to avoid canvas taint from missing CORS headers
+        const resp = await fetch(IMG_URL);
+        const blob = await resp.blob();
+        img = await createImageBitmap(blob);
+    } catch {
+        // Fallback: try loading directly (works if server sends CORS headers)
+        img = new Image();
+        img.crossOrigin = 'anonymous';
+        await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = () => reject(new Error('Cannot load image (CORS blocked). Try hosting it locally.'));
+            img.src = IMG_URL;
+        });
+    }
+
+    log(`Image loaded: ${img.width}x${img.height}`);
+
+    // Scale to cover 600x448, center crop
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    const scale = Math.max(WIDTH / img.width, HEIGHT / img.height);
+    const sw = img.width * scale, sh = img.height * scale;
+    ctx.drawImage(img, (WIDTH - sw) / 2, (HEIGHT - sh) / 2, sw, sh);
+
+    const imageData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
+
+    log('Dithering to 7 colors...');
+    const indices = ditherImage(imageData);
+
+    // Show dithered preview
+    const preview = ctx.createImageData(WIDTH, HEIGHT);
+    for (let i = 0; i < indices.length; i++) {
+        const c = PALETTE[indices[i]];
+        preview.data[i * 4]     = c[0];
+        preview.data[i * 4 + 1] = c[1];
+        preview.data[i * 4 + 2] = c[2];
+        preview.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(preview, 0, 0);
+
+    log('Dithering complete.');
+    return packBuffer(indices);
+}
+
+// Connect to Inkplate via Web Bluetooth
+document.getElementById('connectBtn').addEventListener('click', async () => {
+    try {
+        log('Requesting BLE device...');
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ services: [SERVICE_UUID] }]
+        });
+        log('Found: ' + device.name);
+
+        const server = await device.gatt.connect();
+        log('Connected to GATT server');
+
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        cmdChar = await service.getCharacteristic(CMD_UUID);
+        dataChar = await service.getCharacteristic(DATA_UUID);
+        log('Characteristics acquired');
+
+        document.getElementById('sendBtn').disabled = false;
+
+        device.addEventListener('gattserverdisconnected', () => {
+            log('Disconnected');
+            cmdChar = null;
+            dataChar = null;
+            document.getElementById('sendBtn').disabled = true;
+        });
+    } catch (e) {
+        log('Connect error: ' + e.message);
+    }
+});
+
+// Send image to connected Inkplate
+document.getElementById('sendBtn').addEventListener('click', async () => {
+    if (!cmdChar || !dataChar) return;
+    const sendBtn = document.getElementById('sendBtn');
+    sendBtn.disabled = true;
+
+    try {
+        const packed = await loadAndDither();
+
+        // START
+        log('Sending START...');
+        await cmdChar.writeValueWithResponse(new Uint8Array([0x01]));
+
+        // DATA chunks
+        const totalChunks = Math.ceil(packed.length / CHUNK_SIZE);
+        log(`Sending ${packed.length} bytes in ${totalChunks} chunks...`);
+
+        for (let i = 0; i < totalChunks; i++) {
+            const offset = i * CHUNK_SIZE;
+            const chunk = packed.subarray(offset, offset + CHUNK_SIZE);
+            const packet = new Uint8Array(2 + chunk.length);
+            packet[0] = i & 0xFF;
+            packet[1] = (i >> 8) & 0xFF;
+            packet.set(chunk, 2);
+            await dataChar.writeValueWithoutResponse(packet);
+
+            if (i % 50 === 0 && i > 0) log(`  ${i}/${totalChunks} chunks`);
+        }
+        log(`  ${totalChunks}/${totalChunks} chunks`);
+
+        // END
+        log('Sending END...');
+        await cmdChar.writeValueWithResponse(new Uint8Array([0x02]));
+        log('Done! Display will refresh in ~12 seconds.');
+    } catch (e) {
+        log('Send error: ' + e.message);
+    } finally {
+        sendBtn.disabled = false;
+    }
+});
+</script>
+</body>
+</html>

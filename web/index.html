@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>🗺️ Inflight Map</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main class="container">
+        <h1>🗺️ Inflight Map</h1>
+
+        <article>
+            <div id="map-container">
+                <div id="map"></div>
+                <canvas id="preview" width="600" height="448"></canvas>
+            </div>
+
+            <footer>
+                <div role="group" id="map-buttons">
+                    <button id="capture-btn">Capture</button>
+                </div>
+                <div role="group" id="preview-buttons" style="display:none">
+                    <button id="edit-btn" class="secondary">Back to Editing Map</button>
+                    <button id="send-btn" disabled>Send to All</button>
+                </div>
+                <progress id="progress" value="0" max="100" style="display:none"></progress>
+            </footer>
+        </article>
+
+        <article id="device-list-card">
+            <header><span>Displays</span> <button id="pair-btn" class="secondary outline" style="margin:0;padding:0.3rem 0.7rem;font-size:0.85rem;width:auto">Pair Display</button></header>
+            <ul id="device-list">
+                <li><small>No displays paired yet.</small></li>
+            </ul>
+        </article>
+
+        <details id="log-details" open>
+            <summary>Log</summary>
+            <div id="log"></div>
+        </details>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.19.0/dist/maplibre-gl.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

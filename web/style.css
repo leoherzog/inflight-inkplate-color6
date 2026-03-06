@@ -1,0 +1,80 @@
+/* Map container: fixed at Inkplate resolution */
+#map-container {
+    position: relative;
+    width: 600px;
+    max-width: 100%;
+    margin: 0 auto;
+}
+
+#map {
+    width: 100%;
+    aspect-ratio: 600 / 448;
+    border-radius: var(--pico-border-radius);
+    border: 1px solid var(--pico-muted-border-color);
+}
+
+/* Fix PicoCSS adding margin to MapLibre control buttons */
+.maplibregl-ctrl button { margin-bottom: 0; }
+
+/* Preview canvas (overlays map inside map-container) */
+#preview {
+    display: none;
+    width: 100%;
+    aspect-ratio: 600 / 448;
+    border-radius: var(--pico-border-radius);
+    border: 1px solid var(--pico-muted-border-color);
+}
+
+#map-container.preview-mode #map { display: none; }
+#map-container.preview-mode #preview { display: block; }
+
+/* Displays card header */
+#device-list-card > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Device list */
+#device-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#device-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+}
+
+.status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+    flex-shrink: 0;
+}
+
+.status-dot.connected { background: #2ecc40; }
+.status-dot.disconnected { background: #aaa; }
+
+/* Log output */
+#log {
+    white-space: pre-wrap;
+    font-family: monospace;
+    font-size: 0.8rem;
+    background: var(--pico-code-background-color);
+    padding: 0.75rem;
+    max-height: 200px;
+    overflow-y: auto;
+    border-radius: var(--pico-border-radius);
+}
+
+/* Progress bar */
+progress {
+    margin: 0.5rem 0 0;
+}
