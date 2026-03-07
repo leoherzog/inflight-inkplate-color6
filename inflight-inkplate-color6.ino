@@ -110,7 +110,7 @@ void setup() {
     esp_wifi_deinit();
 
     // Lower CPU frequency: 80MHz is sufficient for BLE, saves ~50% power vs 240MHz
-    setCpuFrequencyMhz(160);
+    setCpuFrequencyMhz(80);
 
     // Enable automatic light sleep with power management
     esp_pm_config_esp32_t pm_config = {
