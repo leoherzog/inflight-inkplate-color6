@@ -75,6 +75,12 @@
 .status-dot.connected { background: #2ecc40; }
 .status-dot.disconnected { background: #aaa; }
 
+.battery-level {
+    font-size: 0.8rem;
+    color: var(--pico-muted-color);
+    margin-left: 0.5rem;
+}
+
 /* Log output */
 #log {
     white-space: pre-wrap;
@@ -4251,7 +4257,8 @@ function updateDeviceList() {
     for (const d of devices) {
         const connected = d.server && d.server.connected;
         const li = document.createElement('li');
-        li.innerHTML = `<span><span class="status-dot ${connected ? 'connected' : 'disconnected'}"></span>${d.name}</span>`;
+        const battText = d.battery != null ? `<span class="battery-level">${d.battery}%</span>` : '';
+        li.innerHTML = `<span><span class="status-dot ${connected ? 'connected' : 'disconnected'}"></span>${d.name}${battText}</span>`;
         deviceList.appendChild(li);
     }
     updateSendButton();
@@ -4267,6 +4274,7 @@ pairBtn.addEventListener('click', async () => {
         log('Scanning for Inkplate displays...');
         const device = await navigator.bluetooth.requestDevice({
             filters: [{ services: [SERVICE_UUID] }],
+            optionalServices: ['battery_service'],
         });
 
         // Don't add duplicates
@@ -4281,14 +4289,30 @@ pairBtn.addEventListener('click', async () => {
         const cmdChar = await service.getCharacteristic(CMD_UUID);
         const dataChar = await service.getCharacteristic(DATA_UUID);
 
-        const entry = { device, server, cmdChar, dataChar, name: device.name || 'Inkplate' };
+        const entry = { device, server, cmdChar, dataChar, name: device.name || 'Inkplate', battery: null };
         devices.push(entry);
+
+        // Read battery level from standard BLE Battery Service
+        try {
+            const battService = await server.getPrimaryService('battery_service');
+            const battChar = await battService.getCharacteristic('battery_level');
+            const val = await battChar.readValue();
+            entry.battery = val.getUint8(0);
+            await battChar.startNotifications();
+            battChar.addEventListener('characteristicvaluechanged', (e) => {
+                entry.battery = e.target.value.getUint8(0);
+                updateDeviceList();
+            });
+        } catch (e) {
+            log(`${device.name}: battery service not available`);
+        }
 
         device.addEventListener('gattserverdisconnected', () => {
             log(`${entry.name} disconnected`);
             entry.server = null;
             entry.cmdChar = null;
             entry.dataChar = null;
+            entry.battery = null;
             updateDeviceList();
         });
 

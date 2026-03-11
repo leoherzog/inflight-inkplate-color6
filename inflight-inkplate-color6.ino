@@ -13,11 +13,37 @@
 #define IMG_BUF_SIZE (600 * 448 / 2)
 #define CHUNK_SIZE 500
 
+// Battery Service (standard BLE GATT)
+#define BATTERY_SERVICE_UUID    "180F"
+#define BATTERY_LEVEL_CHAR_UUID "2A19"
+#define BATTERY_READ_INTERVAL   120000 // ms between battery reads
+// Li-Ion voltage range (single cell)
+#define BATT_V_MIN 3.0
+#define BATT_V_MAX 4.2
+
 Inkplate display;
 uint8_t *imgBuffer = nullptr;
 volatile uint32_t bytesReceived = 0;
 volatile bool displayPending = false;
 NimBLEServer *pServer = nullptr;
+NimBLECharacteristic *pBattChar = nullptr;
+unsigned long lastBatteryRead = 0;
+
+// --- Battery Helper ---
+
+uint8_t voltageToBatteryPercent(double voltage) {
+    if (voltage <= BATT_V_MIN) return 0;
+    if (voltage >= BATT_V_MAX) return 100;
+    return (uint8_t)((voltage - BATT_V_MIN) / (BATT_V_MAX - BATT_V_MIN) * 100);
+}
+
+void updateBatteryLevel() {
+    double voltage = display.readBattery();
+    uint8_t level = voltageToBatteryPercent(voltage);
+    pBattChar->setValue(&level, 1);
+    pBattChar->notify();
+    Serial.printf("Battery: %.2fV (%u%%)\n", voltage, level);
+}
 
 // --- BLE Server Callbacks ---
 
@@ -158,6 +184,15 @@ void setup() {
 
     pService->start();
 
+    // Battery Service (standard BLE GATT profile)
+    NimBLEService *pBattService = pServer->createService(BATTERY_SERVICE_UUID);
+    pBattChar = pBattService->createCharacteristic(
+        BATTERY_LEVEL_CHAR_UUID,
+        NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+    uint8_t initLevel = voltageToBatteryPercent(display.readBattery());
+    pBattChar->setValue(&initLevel, 1);
+    pBattService->start();
+
     NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
 
     // Manually split adv data: UUID in advertisement, name in scan response.
@@ -190,5 +225,12 @@ void loop() {
         esp_task_wdt_init(5, true);
         Serial.println("Display updated.");
     }
+
+    unsigned long now = millis();
+    if (now - lastBatteryRead >= BATTERY_READ_INTERVAL) {
+        lastBatteryRead = now;
+        updateBatteryLevel();
+    }
+
     delay(500);
 }
